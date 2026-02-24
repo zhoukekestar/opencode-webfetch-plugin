@@ -22,9 +22,22 @@ export class BrowserManager {
    * Initializes the persistent context if not already done.
    */
   public async ensureContext(): Promise<void> {
+    let isConnected = false;
     if (this.context && this.page) {
+      try {
+        // Simple check to see if the page is still open and connected
+        isConnected = !this.page.isClosed();
+      } catch (e) {
+        isConnected = false;
+      }
+    }
+
+    if (isConnected) {
       return;
     }
+
+    // Clean up just in case
+    await this.dispose();
 
     const userDataDir = path.resolve(os.homedir(), '.cache/opencode/user-data');
     if (!fs.existsSync(userDataDir)) {
@@ -99,6 +112,9 @@ export class BrowserManager {
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout }).catch((e) => {
         console.warn(`Navigation might have timed out or failed partially: ${e.message}`);
       });
+
+      // too fast
+      await this.page.waitForTimeout(2000);
 
       // Basic heuristic to check if human intervention is needed
       const needsHelp = await this.detectBlockers(this.page);
@@ -190,8 +206,13 @@ export class BrowserManager {
    * Close the browser context safely.
    */
   public async dispose(): Promise<void> {
-    if (this.context) {
-      await this.context.close().catch(() => {});
+    try {
+      if (this.context) {
+        await this.context.close().catch(() => {});
+      }
+    } catch (e) {
+      // Ignore errors on close
+    } finally {
       this.context = null;
       this.page = null;
     }
