@@ -1,6 +1,6 @@
 {
   "name": "opencode-webfetch-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An opencode plugin that exposes a webfetch tool capable of human-in-the-loop interaction for handling captchas and logins.",
   "type": "module",
   "module": "./src/index.ts",
