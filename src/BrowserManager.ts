@@ -13,9 +13,11 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private readonly playwright: PlaywrightModule;
+  private readonly client: any;
 
-  constructor(playwright: PlaywrightModule) {
+  constructor(playwright: PlaywrightModule, client: any) {
     this.playwright = playwright;
+    this.client = client;
   }
 
   /**
@@ -120,7 +122,7 @@ export class BrowserManager {
       const needsHelp = await this.detectBlockers(this.page);
       
       if (needsHelp.blocked) {
-        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`, ctx);
+        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`, ctx, this.client);
       } else {
         // Wait a little bit for dynamic content if not blocked
         await this.page.waitForTimeout(2000);
@@ -129,7 +131,7 @@ export class BrowserManager {
       // Allow one more check in case the user didn't fully resolve it, or if it redirected
       const needsHelpAgain = await this.detectBlockers(this.page);
       if (needsHelpAgain.blocked) {
-        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`, ctx);
+        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`, ctx, this.client);
       }
 
       // Extract content as Markdown

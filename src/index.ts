@@ -8,7 +8,7 @@ const MAX_TIMEOUT = 120_000;
 
 let globalManager: BrowserManager | null = null;
 
-export const WebfetchPlugin: Plugin = async () => {
+export const WebfetchPlugin: Plugin = async ({ client }) => {
   const WebfetchTool = tool({
     description: "Fetch a webpage's main content in markdown.",
     args: {
@@ -23,7 +23,7 @@ export const WebfetchPlugin: Plugin = async () => {
     async execute(params: any, ctx: any) {
       if (!globalManager) {
         const playwright = await loadPlaywright();
-        globalManager = new BrowserManager(playwright);
+        globalManager = new BrowserManager(playwright, client);
       }
       
       const manager = globalManager;
