@@ -26,15 +26,20 @@ export class HumanInteractor {
           body: {
             title: 'Browser Action Required',
             message,
-            variant: 'warning'
+            variant: 'warning',
+            duration: 3000
           }
-          // duration: 10000
+          
         })
 
         await sleep(5000)
-        const res = await checker();
-        if (res.blocked) {
-          continue
+        if (checker) {
+          const res = await checker();
+          if (res.blocked) {
+            continue
+          } else {
+            break
+          }
         } else {
           break
         }
