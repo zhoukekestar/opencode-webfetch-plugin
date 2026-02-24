@@ -1,7 +1,7 @@
 {
-  "name": "opencode-google-ai-search-plugin",
+  "name": "opencode-webfetch-plugin",
   "version": "0.1.0",
-  "description": "An opencode plugin that exposes a Google AI Mode search tool.",
+  "description": "An opencode plugin that exposes a webfetch tool capable of human-in-the-loop interaction for handling captchas and logins.",
   "type": "module",
   "module": "./src/index.ts",
   "scripts": {},
@@ -15,6 +15,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^28.1.0",
     "turndown": "^7.2.2"
   },
   "peerDependencies": {
@@ -23,6 +25,9 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "latest",
+    "@types/jsdom": "^28.0.0",
+    "@types/mozilla-readability": "^0.2.1",
+    "@types/node": "^25.3.0",
     "@types/turndown": "^5.0.6",
     "typescript": "latest"
   }
