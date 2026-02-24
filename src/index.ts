@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import { type Plugin, tool } from "@opencode-ai/plugin"
 import TurndownService from "turndown"
 
 type PlaywrightModule = typeof import("playwright")
@@ -9,24 +9,22 @@ type Page = Awaited<ReturnType<Browser["newPage"]>>
 const DEFAULT_TIMEOUT = 30_000
 const MAX_TIMEOUT = 120_000
 
-export const GoogleAISearchPlugin: Plugin = async ({ Tool, z }) => {
-  const GoogleAITool = Tool.define("google_ai_search_plus", {
+export const GoogleAISearchPlugin: Plugin = async () => {
+  const GoogleAITool = tool({
     description: "Search the web using Google's AI-powered search mode. This tool provides comprehensive, AI-enhanced search results with contextual information, summaries, and source references. Use this for any web searches, current events, factual lookups, research questions, or when you need up-to-date information beyond your knowledge cutoff. Returns structured markdown responses with sources.",
-    parameters: z
-      .object({
-        query: z.string().describe("Question or topic to submit to Google AI Mode"),
-        timeout: z
-          .number()
-          .min(5)
-          .max(120)
-          .optional()
-          .describe("Timeout in seconds (default: 30, max: 120)"),
-        followUp: z
-          .boolean()
-          .optional()
-          .describe("Treat the query as a follow-up in the same session")
-      })
-      .describe("Parameters for google_ai_search_plus"),
+    args: {
+      query: tool.schema.string().describe("Question or topic to submit to Google AI Mode"),
+      timeout: tool.schema
+        .number()
+        .min(5)
+        .max(120)
+        .optional()
+        .describe("Timeout in seconds (default: 30, max: 120)"),
+      followUp: tool.schema
+        .boolean()
+        .optional()
+        .describe("Treat the query as a follow-up in the same session")
+    },
     async execute(params: any, ctx: any) {
       const playwright = await loadPlaywright()
       const manager = new GoogleAIModeManager(playwright)
@@ -41,25 +39,16 @@ export const GoogleAISearchPlugin: Plugin = async ({ Tool, z }) => {
         const result = await manager.query(params.query, params.followUp ?? false, timeoutMs, ctx.abort)
 
         ctx.metadata({
-          title: `Google AI: ${params.query}`,
-          metadata: {
-            query: params.query,
-            sourceCount: result.sources.count,
-            responseTime: result.metadata.responseTime,
-            hasTable: result.tableData.length > 0,
-          },
-        })
-
-        return {
           title: `Google AI Mode: ${params.query}`,
-          output: formatAIResponse(result),
           metadata: {
             query: result.query,
             responseTime: result.metadata.responseTime,
             sources: result.sources,
             hasTable: result.tableData.length > 0,
           },
-        }
+        })
+
+        return formatAIResponse(result)
       } catch (error) {
         const message = (error as Error).message
         if (message.includes("Timeout") || message.includes("forSelector")) {
@@ -74,9 +63,9 @@ export const GoogleAISearchPlugin: Plugin = async ({ Tool, z }) => {
   })
 
   return {
-    async ["tool.register"](_input, { register }) {
-      register(GoogleAITool)
-    },
+    tool: {
+      webfetch: GoogleAITool
+    }
   }
 }
 
