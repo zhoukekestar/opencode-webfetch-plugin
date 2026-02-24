@@ -1,3 +1,5 @@
+import type { ToolContext } from "@opencode-ai/plugin";
+
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -80,7 +82,7 @@ export class BrowserManager {
    * Navigates to a URL and tries to extract the content.
    * Prompts the user via terminal if it encounters a captcha or login screen.
    */
-  public async fetchWebpage(url: string, timeout: number, abortSignal: AbortSignal): Promise<string> {
+  public async fetchWebpage(url: string, timeout: number, ctx: ToolContext): Promise<string> {
     await this.ensureContext();
     if (!this.page) throw new Error('Page not initialized');
 
@@ -90,7 +92,7 @@ export class BrowserManager {
     const onAbort = () => {
       console.log('Operation aborted by user or timeout.');
     };
-    abortSignal.addEventListener('abort', onAbort);
+    ctx.abort.addEventListener('abort', onAbort);
 
     try {
       // Go to the requested URL
@@ -102,7 +104,7 @@ export class BrowserManager {
       const needsHelp = await this.detectBlockers(this.page);
       
       if (needsHelp.blocked) {
-        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`);
+        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`, ctx);
       } else {
         // Wait a little bit for dynamic content if not blocked
         await this.page.waitForTimeout(2000);
@@ -111,7 +113,7 @@ export class BrowserManager {
       // Allow one more check in case the user didn't fully resolve it, or if it redirected
       const needsHelpAgain = await this.detectBlockers(this.page);
       if (needsHelpAgain.blocked) {
-        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`);
+        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`, ctx);
       }
 
       // Extract content as Markdown
@@ -119,7 +121,7 @@ export class BrowserManager {
       const markdown = await Extractor.extractMarkdown(this.page, this.page.url());
       return markdown;
     } finally {
-      abortSignal.removeEventListener('abort', onAbort);
+      ctx.abort.removeEventListener('abort', onAbort);
     }
   }
 

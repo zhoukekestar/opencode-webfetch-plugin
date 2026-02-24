@@ -41,7 +41,7 @@ export const WebfetchPlugin: Plugin = async () => {
           targetUrl = `https://www.google.com/search?q=${encodeURIComponent(targetUrl)}`;
         }
 
-        const markdownResult = await manager.fetchWebpage(targetUrl, timeoutMs, ctx.abort);
+        const markdownResult = await manager.fetchWebpage(targetUrl, timeoutMs, ctx);
 
         ctx.metadata({
           title: `Webfetch: ${targetUrl}`,

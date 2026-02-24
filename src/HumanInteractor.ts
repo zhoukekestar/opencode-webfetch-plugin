@@ -1,27 +1,30 @@
-import * as readline from 'readline';
+import { ToolContext } from "@opencode-ai/plugin";
 
 export class HumanInteractor {
   /**
-   * Pauses execution and prompts the user in the terminal.
-   * Resolves when the user presses Enter.
+   * Pauses execution and prompts the user via the Opencode TUI.
+   * Resolves when the user allows the request.
    * @param message The message to display to the user.
+   * @param ctx The Opencode tool context used to prompt the user.
    */
-  static async askForHumanHelp(message: string): Promise<void> {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    console.log('\n\x1b[33m================ HUMAN INTERVENTION REQUIRED ================\x1b[0m');
-    console.log(`\x1b[1m${message}\x1b[0m`);
-    console.log('\x1b[33m=============================================================\x1b[0m');
-
-    return new Promise((resolve) => {
-      rl.question('\n\x1b[32m[Action Required]\x1b[0m Please complete the action in the browser, then press ENTER to continue...', () => {
-        rl.close();
-        console.log('\x1b[32mResuming execution...\x1b[0m\n');
-        resolve();
+  static async askForHumanHelp(message: string, ctx: ToolContext): Promise<void> {
+    try {
+      await ctx.ask({
+        permission: "Human Intervention Required",
+        patterns: [
+          message,
+          "Please complete the action in the browser, then select 'Allow' to continue."
+        ],
+        always: [],
+        metadata: {
+          actionRequired: true,
+          message: message
+        }
       });
-    });
+      console.log('\x1b[32mResuming execution...\x1b[0m\n');
+    } catch (e) {
+      console.warn("User rejected the human-intervention request or an error occurred.");
+      throw e;
+    }
   }
 }
