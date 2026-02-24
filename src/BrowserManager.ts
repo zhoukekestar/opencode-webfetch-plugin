@@ -122,7 +122,7 @@ export class BrowserManager {
       const needsHelp = await this.detectBlockers(this.page);
       
       if (needsHelp.blocked) {
-        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`, ctx, this.client);
+        await HumanInteractor.askForHumanHelp(`The page appears to be blocked or requires login.\nReason: ${needsHelp.reason}\nURL: ${this.page.url()}`, ctx, this.client, () => this.detectBlockers(this.page));
       } else {
         // Wait a little bit for dynamic content if not blocked
         await this.page.waitForTimeout(2000);
@@ -131,7 +131,7 @@ export class BrowserManager {
       // Allow one more check in case the user didn't fully resolve it, or if it redirected
       const needsHelpAgain = await this.detectBlockers(this.page);
       if (needsHelpAgain.blocked) {
-        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`, ctx, this.client);
+        await HumanInteractor.askForHumanHelp(`Still detected a blocker.\nReason: ${needsHelpAgain.reason}\nPlease complete the action and try again.`, ctx, this.client, () => this.detectBlockers(this.page));
       }
 
       // Extract content as Markdown
@@ -146,8 +146,9 @@ export class BrowserManager {
   /**
    * Detects if the current page is blocked by Captcha, Cloudflare, or a Login wall.
    */
-  private async detectBlockers(page: Page): Promise<{ blocked: boolean; reason?: string }> {
+  private async detectBlockers(page: Page | null): Promise<{ blocked: boolean; reason?: string }> {
     try {
+      if (page == null) return {blocked: false}
       const url = page.url();
 
       // 0. Check for about:blank (no network connection)
