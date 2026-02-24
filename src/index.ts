@@ -10,15 +10,15 @@ let globalManager: BrowserManager | null = null;
 
 export const WebfetchPlugin: Plugin = async () => {
   const WebfetchTool = tool({
-    description: "Fetch a webpage's main content and interact with it. Useful for getting information from URLs. If blocked by login or captchas, the tool will automatically pause and prompt the human user to complete the necessary actions, allowing you to access protected content. Use this to read documentation, search results, articles, and explore deep web pages.",
+    description: "Fetch a webpage's main content in markdown.",
     args: {
-      url: tool.schema.string().describe("The URL to fetch. Can also be a search query which will be converted to a Google Search URL."),
-      timeout: tool.schema
-        .number()
-        .min(5)
-        .max(120)
-        .optional()
-        .describe("Timeout in seconds (default: 30, max: 120)"),
+      url: tool.schema.string().describe("The URL to fetch."),
+      // timeout: tool.schema
+      //   .number()
+      //   .min(5)
+      //   .max(120)
+      //   .optional()
+      //   .describe("Timeout in seconds (default: 30, max: 120)"),
     },
     async execute(params: any, ctx: any) {
       if (!globalManager) {

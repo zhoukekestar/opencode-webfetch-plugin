@@ -29,18 +29,31 @@ export class BrowserManager {
       fs.mkdirSync(userDataDir, { recursive: true });
     }
 
-    // Launch a persistent browser context, preserving cookies and local storage.
-    this.context = await this.playwright.chromium.launchPersistentContext(userDataDir, {
-      headless: false, // Default to headful so users can see captchas
+    // Launch a persistent context with extension support
+    const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
+    const extensions: string[] = [];
+    if (fs.existsSync(extensionPath)) {
+      const dirs = fs.readdirSync(extensionPath).map(d => path.join(extensionPath, d));
+      extensions.push(...dirs.filter(d => fs.statSync(d).isDirectory()));
+    }
+
+    const launchOptions: Parameters<typeof this.playwright.chromium.launchPersistentContext>[1] = {
+      headless: false,
       args: [
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-blink-features=AutomationControlled',
         '--disable-features=VizDisplayCompositor',
         '--window-size=1280,720',
+        ...(extensions.length > 0 ? [
+          `--disable-extensions-except=${extensions.join(',')}`,
+          `--load-extension=${extensions.join(',')}`
+        ] : []),
       ],
       viewport: { width: 1280, height: 720 },
-    });
+    };
+
+    this.context = await this.playwright.chromium.launchPersistentContext(userDataDir, launchOptions);
 
     // Create a new page or use the default one created by launchPersistentContext
     const pages = this.context.pages();
