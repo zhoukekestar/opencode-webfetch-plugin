@@ -1,3 +1,4 @@
+import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { HumanInteractor } from './HumanInteractor.js';
@@ -23,7 +24,7 @@ export class BrowserManager {
       return;
     }
 
-    const userDataDir = path.resolve(process.cwd(), '.userdata');
+    const userDataDir = path.resolve(os.homedir(), '.cache/opencode/user-data');
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
     }
@@ -115,6 +116,11 @@ export class BrowserManager {
   private async detectBlockers(page: Page): Promise<{ blocked: boolean; reason?: string }> {
     try {
       const url = page.url();
+
+      // 0. Check for about:blank (no network connection)
+      if (url === 'about:blank') {
+        return { blocked: true, reason: 'No network connection. Please check your internet and press Enter to continue.' };
+      }
 
       // 1. Check URL patterns for logins or known captchas
       if (url.includes('/login') || url.includes('/signin') || url.includes('auth0.com')) {
