@@ -4,7 +4,10 @@
   "description": "An opencode plugin that exposes a webfetch tool capable of human-in-the-loop interaction for handling captchas and logins.",
   "type": "module",
   "module": "./src/index.ts",
-  "scripts": {},
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
   "keywords": [
     "opencode",
     "plugin",
@@ -17,6 +20,7 @@
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^28.1.0",
+    "playwright-core": "^1.58.2",
     "turndown": "^7.2.2"
   },
   "peerDependencies": {
