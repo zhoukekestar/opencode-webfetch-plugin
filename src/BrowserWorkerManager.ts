@@ -1,5 +1,6 @@
 import { fork, type ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
+import * as fs from 'fs';
 import * as path from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,13 +56,16 @@ export class BrowserWorkerManager {
       
       this.client?.logger?.info(`Starting browser worker: ${workerPath}`);
       
-      // Use tsx directly as the executable (it's in node_modules/.bin)
+      // Use bun's resolve interface to find tsx executable, fallback to path-based
+      const tsxBin2 = path.resolve(__dirname, '../../.bin/tsx');
       const tsxBin = path.resolve(__dirname, '../node_modules/.bin/tsx');
+      
+      const execPath = fs.existsSync(tsxBin2) ? tsxBin2 : tsxBin;
       
       // Use tsx to execute TypeScript directly
       this.worker = fork(workerPath, [], {
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-        execPath: tsxBin,
+        execPath,
         execArgv: [],
       });
 
