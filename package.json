@@ -6,7 +6,10 @@
   "module": "./src/index.ts",
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "keywords": [
     "opencode",
@@ -25,7 +28,7 @@
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "latest",
-    "playwright": "latest"
+    "playwright": "^1.58.2"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "latest",
@@ -33,6 +36,8 @@
     "@types/mozilla-readability": "^0.2.1",
     "@types/node": "^25.3.0",
     "@types/turndown": "^5.0.6",
-    "typescript": "latest"
+    "@vitest/ui": "^4.0.18",
+    "typescript": "latest",
+    "vitest": "^4.0.18"
   }
 }

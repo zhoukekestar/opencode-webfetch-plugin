@@ -10,11 +10,13 @@ const LOCK_FILE = path.resolve(os.homedir(), '.cache/opencode/browser.lock');
 const USER_DATA_DIR = path.resolve(os.homedir(), '.cache/opencode/user-data');
 
 /**
- * Manages a singleton browser instance that multiple processes can connect to.
- * Uses file-based locking to ensure only one process launches the browser.
+ * Manages a shared browser instance that multiple processes can connect to.
+ * One process launches the browser, others connect via WebSocket endpoint.
+ * Each process creates its own pages without interfering with others.
  */
 export class BrowserServer {
   private static instance: BrowserServer | null = null;
+  private static initPromise: Promise<BrowserServer> | null = null;
   private context: BrowserContext | null = null;
   private readonly playwright: PlaywrightModule;
   private readonly client: any;
@@ -26,22 +28,34 @@ export class BrowserServer {
   }
 
   /**
-   * Gets or creates the singleton browser server instance.
+   * Gets or creates the browser server instance for this process.
    */
   static async getInstance(playwright: PlaywrightModule, client: any): Promise<BrowserServer> {
+    if (BrowserServer.initPromise) {
+      return BrowserServer.initPromise;
+    }
+
     if (!BrowserServer.instance) {
-      BrowserServer.instance = new BrowserServer(playwright, client);
-      await BrowserServer.instance.initialize();
+      BrowserServer.initPromise = (async () => {
+        BrowserServer.instance = new BrowserServer(playwright, client);
+        await BrowserServer.instance.initialize();
+        return BrowserServer.instance;
+      })();
+      
+      try {
+        const instance = await BrowserServer.initPromise;
+        return instance;
+      } finally {
+        BrowserServer.initPromise = null;
+      }
     }
     return BrowserServer.instance;
   }
 
   /**
    * Initializes the browser connection.
-   * Either launches a new browser (if this is the first process) or connects to existing one.
    */
   private async initialize(): Promise<void> {
-    // Ensure cache directory exists
     const cacheDir = path.dirname(LOCK_FILE);
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
@@ -51,72 +65,75 @@ export class BrowserServer {
       fs.mkdirSync(USER_DATA_DIR, { recursive: true });
     }
 
-    // Try to acquire lock and launch browser
-    if (await this.tryAcquireLock()) {
-      await this.launchBrowser();
-    } else {
-      // Another process owns the browser, connect to it
-      await this.connectToBrowser();
-    }
-  }
-
-  /**
-   * Attempts to acquire the browser lock.
-   * Returns true if this process should launch the browser.
-   */
-  private async tryAcquireLock(): Promise<boolean> {
-    try {
-      // Check if lock file exists and is still valid
-      if (fs.existsSync(LOCK_FILE)) {
-        const lockData = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf-8'));
-        const lockPid = lockData.pid;
-
-        // Check if the process that created the lock is still running
-        try {
-          process.kill(lockPid, 0); // Signal 0 checks if process exists
-          // Process exists, we should connect to it
-          return false;
-        } catch (e) {
-          // Process doesn't exist, remove stale lock
-          this.client?.logger?.info('Removing stale browser lock file');
+    const wsEndpoint = this.readWsEndpoint();
+    if (wsEndpoint) {
+      try {
+        await this.connectToBrowser(wsEndpoint);
+        return;
+      } catch (e) {
+        this.client?.logger?.warn('Failed to connect to existing browser, will launch new one');
+        if (fs.existsSync(LOCK_FILE)) {
           fs.unlinkSync(LOCK_FILE);
         }
       }
+    }
 
-      // Create lock file with current process info
+    await this.launchBrowser();
+  }
+
+  /**
+   * Reads the WebSocket endpoint from lock file.
+   */
+  private readWsEndpoint(): string | null {
+    try {
+      if (fs.existsSync(LOCK_FILE)) {
+        const lockData = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf-8'));
+        
+        try {
+          process.kill(lockData.pid, 0);
+          return lockData.wsEndpoint;
+        } catch (e) {
+          return null;
+        }
+      }
+    } catch (e) {
+      this.client?.logger?.error('Error reading WebSocket endpoint:', e);
+    }
+    return null;
+  }
+
+  /**
+   * Writes the WebSocket endpoint to lock file.
+   */
+  private writeWsEndpoint(wsEndpoint: string): void {
+    try {
       fs.writeFileSync(LOCK_FILE, JSON.stringify({
         pid: process.pid,
-        port: CDP_PORT,
+        wsEndpoint,
         timestamp: Date.now()
       }));
 
-      this.isOwner = true;
-
-      // Clean up lock fi when process exits
       process.on('exit', () => {
         if (this.isOwner && fs.existsSync(LOCK_FILE)) {
           try {
             fs.unlinkSync(LOCK_FILE);
           } catch (e) {
-            // Ignore errors during cleanup
+            // Ignore
           }
         }
       });
-
-      return true;
     } catch (e) {
-      this.client?.logger?.error('Error acquiring browser lock:', e);
-      return false;
+      this.client?.logger?.error('Error writing WebSocket endpoint:', e);
     }
   }
 
   /**
-   * Launches a new browser instance with CDP enabled.
+   * Launches a new browser instance.
    */
   private async launchBrowser(): Promise<void> {
     this.client?.logger?.info('Launching new browser instance...');
+    this.isOwner = true;
 
-    // Load extensions if available
     const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
     const extensions: string[] = [];
     if (fs.existsSync(extensionPath)) {
@@ -143,7 +160,9 @@ export class BrowserServer {
 
     this.context = await this.playwright.chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
 
-    // Mask webdriver on all pages
+    const wsEndpoint = `http://localhost:${CDP_PORT}`;
+    this.writeWsEndpoint(wsEndpoint);
+
     this.context.on('page', async (page) => {
       await page.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', {
@@ -161,35 +180,20 @@ export class BrowserServer {
   }
 
   /**
-   * Connects to an existing browser instance via CDP.
+   * Connects to an existing browser instance.
    */
-  private async connectToBrowser(): Promise<void> {
+  private async connectToBrowser(wsEndpoint: string): Promise<void> {
     this.client?.logger?.info('Connecting to existing browser instance...');
 
-    const maxRetries = 10;
-    const retryDelay = 500;
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const browser = await this.playwright.chromium.connectOverCDP(`http://localhost:${CDP_PORT}`);
-        
-        // Get the default context (persistent context)
-        const contexts = browser.contexts();
-        if (contexts.length > 0) {
-          this.context = contexts[0];
-          this.client?.logger?.info('Connected to existing browser');
-          return;
-        }
-      } catch (e) {
-        if (i === maxRetries - 1) {
-          throw new Error(`Failed to connect to browser after ${maxRetries} attempts: ${e}`);
-        }
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-      }
+    const browser = await this.playwright.chromium.connectOverCDP(wsEndpoint);
+    
+    const contexts = browser.contexts();
+    if (contexts.length > 0) {
+      this.context = contexts[0];
+      this.client?.logger?.info('Connected to existing browser');
+    } else {
+      throw new Error('No context available in connected browser');
     }
-
-    throw new Error('Failed to connect to browser: no context available');
   }
 
   /**
