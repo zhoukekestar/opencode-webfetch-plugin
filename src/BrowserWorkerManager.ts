@@ -55,17 +55,34 @@ export class BrowserWorkerManager {
       
       this.client?.logger?.info(`Starting browser worker: ${workerPath}`);
       
-      // Use node with tsx to execute TypeScript directly
+      // Use tsx directly as the executable (it's in node_modules/.bin)
+      const tsxBin = path.resolve(__dirname, '../node_modules/.bin/tsx');
+      
+      // Use tsx to execute TypeScript directly
       this.worker = fork(workerPath, [], {
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-        execPath: 'node',
-        execArgv: ['--import', 'tsx'],
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        execPath: tsxBin,
+        execArgv: [],
       });
+
+      // Forward stdout to logger for debugging
+      if (this.worker.stdout) {
+        this.worker.stdout.on('data', (data) => {
+          this.client?.logger?.info(`[Worker stdout] ${data.toString().trim()}`);
+        });
+      }
 
       // Forward stderr to logger
       if (this.worker.stderr) {
         this.worker.stderr.on('data', (data) => {
-          this.client?.logger?.info(`[Worker] ${data.toString().trim()}`);
+          this.client?.logger?.error(`[Worker stderr] ${data.toString().trim()}`);
+        });
+      }
+
+      // Forward stderr to logger
+      if (this.worker.stderr) {
+        this.worker.stderr.on('data', (data) => {
+          this.client?.logger?.error(`[Worker stderr] ${data.toString().trim()}`);
         });
       }
 
