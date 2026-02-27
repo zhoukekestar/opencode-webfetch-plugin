@@ -45,7 +45,7 @@ export class HumanInteractor {
         }
       }
     } catch (e) {
-      console.error(e)
+      client?.logger?.error('Error in human interaction:', e);
     }
   }
 }

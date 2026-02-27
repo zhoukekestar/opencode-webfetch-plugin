@@ -22,7 +22,7 @@ export class BrowserManager {
    */
   private async ensureBrowserServer(): Promise<BrowserServer> {
     if (!this.browserServer) {
-      this.browserServer = await BrowserServer.getInstance(this.playwright);
+      this.browserServer = await BrowserServer.getInstance(this.playwright, this.client);
     }
     return this.browserServer;
   }
@@ -41,11 +41,11 @@ export class BrowserManager {
     // Create a new page for each concurrent request
     const page = await context.newPage();
 
-    console.log(`\nNavigating to: ${url}`);
+    this.client?.logger?.info(`Navigating to: ${url}`);
     
     // Add a listener to handle abortions
     const onAbort = () => {
-      console.log('Operation aborted by user or timeout.');
+      this.client?.logger?.info('Operation aborted by user or timeout.');
       page.close().catch(() => undefined);
     };
     ctx.abort.addEventListener('abort', onAbort);
@@ -53,7 +53,7 @@ export class BrowserManager {
     try {
       // Go to the requested URL
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout }).catch((e) => {
-        console.warn(`Navigation might have timed out or failed partially: ${e.message}`);
+        this.client?.logger?.warn(`Navigation might have timed out or failed partially: ${e.message}`);
       });
 
       // too fast
@@ -76,7 +76,7 @@ export class BrowserManager {
       }
 
       // Extract content as Markdown
-      console.log('Extracting page content...');
+      this.client?.logger?.info('Extracting page content...');
       const markdown = await Extractor.extractMarkdown(page, page.url());
       return markdown;
     } finally {
@@ -142,7 +142,7 @@ export class BrowserManager {
       }
 
     } catch (e) {
-      console.error('Error detecting blockers:', e);
+      this.client?.logger?.error('Error detecting blockers:', e);
     }
 
     return { blocked: false };

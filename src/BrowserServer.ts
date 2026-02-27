@@ -17,18 +17,20 @@ export class BrowserServer {
   private static instance: BrowserServer | null = null;
   private context: BrowserContext | null = null;
   private readonly playwright: PlaywrightModule;
+  private readonly client: any;
   private isOwner: boolean = false;
 
-  private constructor(playwright: PlaywrightModule) {
+  private constructor(playwright: PlaywrightModule, client: any) {
     this.playwright = playwright;
+    this.client = client;
   }
 
   /**
    * Gets or creates the singleton browser server instance.
    */
-  static async getInstance(playwright: PlaywrightModule): Promise<BrowserServer> {
+  static async getInstance(playwright: PlaywrightModule, client: any): Promise<BrowserServer> {
     if (!BrowserServer.instance) {
-      BrowserServer.instance = new BrowserServer(playwright);
+      BrowserServer.instance = new BrowserServer(playwright, client);
       await BrowserServer.instance.initialize();
     }
     return BrowserServer.instance;
@@ -76,7 +78,7 @@ export class BrowserServer {
           return false;
         } catch (e) {
           // Process doesn't exist, remove stale lock
-          console.log('Removing stale browser lock file');
+          this.client?.logger?.info('Removing stale browser lock file');
           fs.unlinkSync(LOCK_FILE);
         }
       }
@@ -103,7 +105,7 @@ export class BrowserServer {
 
       return true;
     } catch (e) {
-      console.error('Error acquiring browser lock:', e);
+      this.client?.logger?.error('Error acquiring browser lock:', e);
       return false;
     }
   }
@@ -112,7 +114,7 @@ export class BrowserServer {
    * Launches a new browser instance with CDP enabled.
    */
   private async launchBrowser(): Promise<void> {
-    console.log('Launching new browser instance...');
+    this.client?.logger?.info('Launching new browser instance...');
 
     // Load extensions if available
     const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
@@ -155,14 +157,14 @@ export class BrowserServer {
       });
     });
 
-    console.log(`Browser launched with CDP on port ${CDP_PORT}`);
+    this.client?.logger?.info(`Browser launched with CDP on port ${CDP_PORT}`);
   }
 
   /**
    * Connects to an existing browser instance via CDP.
    */
   private async connectToBrowser(): Promise<void> {
-    console.log('Connecting to existing browser instance...');
+    this.client?.logger?.info('Connecting to existing browser instance...');
 
     const maxRetries = 10;
     const retryDelay = 500;
@@ -175,7 +177,7 @@ export class BrowserServer {
         const contexts = browser.contexts();
         if (contexts.length > 0) {
           this.context = contexts[0];
-          console.log('Connected to existing browser');
+          this.client?.logger?.info('Connected to existing browser');
           return;
         }
       } catch (e) {
@@ -211,9 +213,9 @@ export class BrowserServer {
     if (this.isOwner && this.context) {
       try {
         await this.context.close();
-        console.log('ed');
+        this.client?.logger?.info('Browser closed');
       } catch (e) {
-        console.error('Error closing browser:', e);
+        this.client?.logger?.error('Error closing browser:', e);
       }
     }
     this.context = null;
