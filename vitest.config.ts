@@ -6,9 +6,10 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 60000,
     hookTimeout: 60000,
-    teardownTimeout: 10000,
+    teardownTimeout: 5000,
     isolate: false,
     maxConcurrency: 1,
+    fileParallelism: false,
     sequence: {
       concurrent: false,
     },

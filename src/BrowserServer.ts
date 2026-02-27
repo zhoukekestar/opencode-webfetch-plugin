@@ -1,19 +1,14 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as http from 'http';
 import type { BrowserContext } from 'playwright';
 
 type PlaywrightModule = typeof import('playwright');
 
-const CDP_PORT = 9222;
-const LOCK_FILE = path.resolve(os.homedir(), '.cache/opencode/browser.lock');
-const USER_DATA_DIR = path.resolve(os.homedir(), '.cache/opencode/user-data');
+const CDP_PORT = parseInt(process.env.WEBFETCH_CDP_PORT || '9222', 10);
+const USER_DATA_DIR = path.resolve(os.homedir(), `.cache/opencode/user-data-${CDP_PORT}`);
 
-/**
- * Manages a shared browser instance that multiple processes can connect to.
- * One process launches the browser, others connect via WebSocket endpoint.
- * Each process creates its own pages without interfering with others.
- */
 export class BrowserServer {
   private static instance: BrowserServer | null = null;
   private static initPromise: Promise<BrowserServer> | null = null;
@@ -27,9 +22,6 @@ export class BrowserServer {
     this.client = client;
   }
 
-  /**
-   * Gets or creates the browser server instance for this process.
-   */
   static async getInstance(playwright: PlaywrightModule, client: any): Promise<BrowserServer> {
     if (BrowserServer.initPromise) {
       return BrowserServer.initPromise;
@@ -52,87 +44,61 @@ export class BrowserServer {
     return BrowserServer.instance;
   }
 
-  /**
-   * Initializes the browser connection.
-   */
   private async initialize(): Promise<void> {
-    const cacheDir = path.dirname(LOCK_FILE);
-    if (!fs.existsSync(cacheDir)) {
-      fs.mkdirSync(cacheDir, { recursive: true });
-    }
-
     if (!fs.existsSync(USER_DATA_DIR)) {
       fs.mkdirSync(USER_DATA_DIR, { recursive: true });
     }
 
-    const wsEndpoint = this.readWsEndpoint();
-    if (wsEndpoint) {
-      try {
-        await this.connectToBrowser(wsEndpoint);
-        return;
-      } catch (e) {
-        this.client?.logger?.warn('Failed to connect to existing browser, will launch new one');
-        if (fs.existsSync(LOCK_FILE)) {
-          fs.unlinkSync(LOCK_FILE);
-        }
-      }
+    if (await this.tryConnect()) {
+      return;
     }
 
     await this.launchBrowser();
   }
 
-  /**
-   * Reads the WebSocket endpoint from lock file.
-   */
-  private readWsEndpoint(): string | null {
-    try {
-      if (fs.existsSync(LOCK_FILE)) {
-        const lockData = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf-8'));
-        
-        try {
-          process.kill(lockData.pid, 0);
-          return lockData.wsEndpoint;
-        } catch (e) {
-          return null;
-        }
-      }
-    } catch (e) {
-      this.client?.logger?.error('Error reading WebSocket endpoint:', e);
+  private async tryConnect(): Promise<boolean> {
+    if (!(await this.isPortInUse(CDP_PORT))) {
+      return false;
     }
-    return null;
+
+    try {
+      await this.connectToBrowser(`http://localhost:${CDP_PORT}`);
+      return true;
+    } catch (e) {
+      this.client?.logger?.warn(`Failed to connect: ${e}`);
+      return false;
+    }
   }
 
-  /**
-   * Writes the WebSocket endpoint to lock file.
-   */
-  private writeWsEndpoint(wsEndpoint: string): void {
-    try {
-      fs.writeFileSync(LOCK_FILE, JSON.stringify({
-        pid: process.pid,
-        wsEndpoint,
-        timestamp: Date.now()
-      }));
-
-      process.on('exit', () => {
-        if (this.isOwner && fs.existsSync(LOCK_FILE)) {
-          try {
-            fs.unlinkSync(LOCK_FILE);
-          } catch (e) {
-            // Ignore
-          }
-        }
+  private async isPortInUse(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const req = http.request({
+        hostname: 'localhost',
+        port: port,
+        path: '/json/version',
+        method: 'GET',
+        timeout: 1000
+      }, (res) => {
+        resolve(res.statusCode === 200);
       });
-    } catch (e) {
-      this.client?.logger?.error('Error writing WebSocket endpoint:', e);
-    }
+      
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      
+      req.end();
+    });
   }
 
-  /**
-   * Launches a new browser instance.
-   */
   private async launchBrowser(): Promise<void> {
     this.client?.logger?.info('Launching new browser instance...');
-    this.isOwner = true;
+
+    const singletonLock = path.join(USER_DATA_DIR, 'SingletonLock');
+    if (fs.existsSync(singletonLock)) {
+      fs.unlinkSync(singletonLock);
+    }
 
     const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
     const extensions: string[] = [];
@@ -159,9 +125,7 @@ export class BrowserServer {
     };
 
     this.context = await this.playwright.chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-
-    const wsEndpoint = `http://localhost:${CDP_PORT}`;
-    this.writeWsEndpoint(wsEndpoint);
+    this.isOwner = true;
 
     this.context.on('page', async (page) => {
       await page.addInitScript(() => {
@@ -179,11 +143,8 @@ export class BrowserServer {
     this.client?.logger?.info(`Browser launched with CDP on port ${CDP_PORT}`);
   }
 
-  /**
-   * Connects to an existing browser instance.
-   */
   private async connectToBrowser(wsEndpoint: string): Promise<void> {
-    this.client?.logger?.info('Connecting to existing browser instance...');
+    this.client?.logger?.info(`Connecting to browser at ${wsEndpoint}...`);
 
     const browser = await this.playwright.chromium.connectOverCDP(wsEndpoint);
     
@@ -196,23 +157,14 @@ export class BrowserServer {
     }
   }
 
-  /**
-   * Gets the browser context.
-   */
   getContext(): BrowserContext | null {
     return this.context;
   }
 
-  /**
-   * Checks if this process owns the browser.
-   */
   isOwnerProcess(): boolean {
     return this.isOwner;
   }
 
-  /**
-   * Closes the browser if this process owns it.
-   */
   async dispose(): Promise<void> {
     if (this.isOwner && this.context) {
       try {
@@ -223,5 +175,6 @@ export class BrowserServer {
       }
     }
     this.context = null;
+    this.isOwner = false;
   }
 }
