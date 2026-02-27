@@ -1,5 +1,8 @@
 # Opencode Google AI Search Plugin
 
+// bun 执行 playwright 会有协议握手的 bug，导致无法连接，所以需要通过 nodejs 来绕过
+      // https://github.com/oven-sh/bun/issues/9911
+
 An Opencode plugin that exposes a native tool (`google_ai_search_plus`) for querying Google AI Mode (aka Google SGE). It uses Playwright to load the AI panel directly and converts the full response into markdown with Turndown so the output renders just like the built-in `webfetch` tool.
 
 ## Features
