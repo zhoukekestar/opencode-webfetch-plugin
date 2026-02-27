@@ -22,20 +22,20 @@ describe('Browser Tests', () => {
     resetBrowserServerSingleton();
   });
 
-  // it('should fetch two pages concurrently in the same browser instance', async () => {
-  //   const playwright = await getPlaywright();
-  //   const client = { logger: console };
+  it('should fetch two pages concurrently in the same browser instance', async () => {
+    const playwright = await getPlaywright();
+    const client = { logger: console };
     
-  //   const manager = new BrowserManager(playwright, client);
+    const manager = new BrowserManager(playwright, client);
     
-  //   const [result1, result2] = await Promise.all([
-  //     manager.fetchWebpage('https://example.com', 30000, { abort: new AbortController().signal } as any),
-  //     manager.fetchWebpage('https://httpbin.org/html', 30000, { abort: new AbortController().signal } as any),
-  //   ]);
+    const [result1, result2] = await Promise.all([
+      manager.fetchWebpage('https://example.com', 30000, { abort: new AbortController().signal } as any),
+      manager.fetchWebpage('https://httpbin.org/html', 30000, { abort: new AbortController().signal } as any),
+    ]);
     
-  //   expect(result1).toContain('Example Domain');
-  //   expect(result2).toContain('httpbin.org');
-  // });
+    expect(result1).toContain('Example Domain');
+    expect(result2).toContain('httpbin.org');
+  });
 
   it('should share browser between two independent processes', async () => {
     const workerScript = path.join(__dirname, 'helpers', 'cookie-worker.ts');

@@ -3,10 +3,8 @@
   "version": "0.1.1",
   "description": "An opencode plugin that exposes a webfetch tool capable of human-in-the-loop interaction for handling captchas and logins.",
   "type": "module",
-  "module": "./src/index.ts",
+  "main": "./src/index.ts",
   "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"

@@ -2,12 +2,19 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import type { BrowserContext } from 'playwright';
 
 type PlaywrightModule = typeof import('playwright');
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_DIR = path.resolve(__dirname, '..');
+
 const CDP_PORT = parseInt(process.env.WEBFETCH_CDP_PORT || '9222', 10);
 const USER_DATA_DIR = path.resolve(os.homedir(), `.cache/opencode/user-data-${CDP_PORT}`);
+const LAUNCH_SCRIPT = path.resolve(os.homedir(), '.cache/opencode/launch-browser.ts');
 
 export class BrowserServer {
   private static instance: BrowserServer | null = null;
@@ -15,7 +22,6 @@ export class BrowserServer {
   private context: BrowserContext | null = null;
   private readonly playwright: PlaywrightModule;
   private readonly client: any;
-  private isOwner: boolean = false;
 
   private constructor(playwright: PlaywrightModule, client: any) {
     this.playwright = playwright;
@@ -49,11 +55,111 @@ export class BrowserServer {
       fs.mkdirSync(USER_DATA_DIR, { recursive: true });
     }
 
-    if (await this.tryConnect()) {
-      return;
+    this.ensureLaunchScript();
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (await this.tryConnect()) {
+        return;
+      }
+
+      this.client?.logger?.info(`Attempt ${attempt}/3: Starting independent browser process...`);
+      
+      await this.spawnIndependentBrowser();
+      
+      const waitTime = Math.floor(Math.random() * 3000) + 2000;
+      this.client?.logger?.info(`Waiting ${waitTime}ms for browser to start...`);
+      await this.sleep(waitTime);
+
+      if (await this.tryConnect()) {
+        return;
+      }
     }
 
-    await this.launchBrowser();
+    throw new Error('Failed to start or connect to browser after 3 attempts');
+  }
+
+  private ensureLaunchScript(): void {
+    const scriptContent = `import { chromium } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+const CDP_PORT = ${CDP_PORT};
+const USER_DATA_DIR = path.resolve(os.homedir(), '.cache/opencode/user-data-${CDP_PORT}');
+
+async function main() {
+  const singletonLock = path.join(USER_DATA_DIR, 'SingletonLock');
+  if (fs.existsSync(singletonLock)) {
+    fs.unlinkSync(singletonLock);
+  }
+
+  const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
+  const extensions: string[] = [];
+  if (fs.existsSync(extensionPath)) {
+    const dirs = fs.readdirSync(extensionPath).map(d => path.join(extensionPath, d));
+    extensions.push(...dirs.filter(d => fs.statSync(d).isDirectory()));
+  }
+
+  const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
+    headless: false,
+    ignoreDefaultArgs: ['--remote-debugging-pipe'],
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--remote-allow-origins="*"',
+      // '--disable-blink-features=AutomationControlled',
+      // '--disable-features=VizDisplayCompositor',
+      // '--window-size=1280,720',
+      '--remote-debugging-port=' + CDP_PORT,
+      // ...(extensions.length > 0 ? [
+      //   '--disable-extensions-except=' + extensions.join(','),
+      //   '--load-extension=' + extensions.join(',')
+      // ] : []),
+    ],
+    viewport: { width: 1280, height: 720 },
+  });
+
+  context.on('page', async (page) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      const chrome = (window as any).chrome;
+      if (chrome && chrome.runtime && chrome.runtime.onConnect) {
+        delete chrome.runtime.onConnect;
+      }
+    });
+  });
+
+  console.log('Browser launched on port ' + CDP_PORT);
+}
+
+main().catch(console.error);
+`;
+
+    const scriptDir = path.dirname(LAUNCH_SCRIPT);
+    if (!fs.existsSync(scriptDir)) {
+      fs.mkdirSync(scriptDir, { recursive: true });
+    }
+    fs.writeFileSync(LAUNCH_SCRIPT, scriptContent);
+  }
+
+  private async spawnIndependentBrowser(): Promise<void> {
+    return new Promise((resolve) => {
+      const child = spawn('npx', ['tsx', LAUNCH_SCRIPT], {
+        cwd: PROJECT_DIR,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        shell: true,
+      });
+      
+      child.unref();
+      
+      child.on('error', (e) => {
+        this.client?.logger?.warn(`Failed to spawn browser: ${e.message}`);
+      });
+
+      resolve();
+    });
   }
 
   private async tryConnect(): Promise<boolean> {
@@ -92,57 +198,6 @@ export class BrowserServer {
     });
   }
 
-  private async launchBrowser(): Promise<void> {
-    this.client?.logger?.info('Launching new browser instance...');
-
-    const singletonLock = path.join(USER_DATA_DIR, 'SingletonLock');
-    if (fs.existsSync(singletonLock)) {
-      fs.unlinkSync(singletonLock);
-    }
-
-    const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
-    const extensions: string[] = [];
-    if (fs.existsSync(extensionPath)) {
-      const dirs = fs.readdirSync(extensionPath).map(d => path.join(extensionPath, d));
-      extensions.push(...dirs.filter(d => fs.statSync(d).isDirectory()));
-    }
-
-    const launchOptions: Parameters<typeof this.playwright.chromium.launchPersistentContext>[1] = {
-      headless: false,
-      args: [
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=VizDisplayCompositor',
-        '--window-size=1280,720',
-        `--remote-debugging-port=${CDP_PORT}`,
-        ...(extensions.length > 0 ? [
-          `--disable-extensions-except=${extensions.join(',')}`,
-          `--load-extension=${extensions.join(',')}`
-        ] : []),
-      ],
-      viewport: { width: 1280, height: 720 },
-    };
-
-    this.context = await this.playwright.chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-    this.isOwner = true;
-
-    this.context.on('page', async (page) => {
-      await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => false,
-        });
-
-        const chrome = (window as any).chrome;
-        if (chrome && chrome.runtime && chrome.runtime.onConnect) {
-          delete chrome.runtime.onConnect;
-        }
-      });
-    });
-
-    this.client?.logger?.info(`Browser launched with CDP on port ${CDP_PORT}`);
-  }
-
   private async connectToBrowser(wsEndpoint: string): Promise<void> {
     this.client?.logger?.info(`Connecting to browser at ${wsEndpoint}...`);
 
@@ -157,24 +212,15 @@ export class BrowserServer {
     }
   }
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   getContext(): BrowserContext | null {
     return this.context;
   }
 
-  isOwnerProcess(): boolean {
-    return this.isOwner;
-  }
-
   async dispose(): Promise<void> {
-    if (this.isOwner && this.context) {
-      try {
-        await this.context.close();
-        this.client?.logger?.info('Browser closed');
-      } catch (e) {
-        this.client?.logger?.error('Error closing browser:', e);
-      }
-    }
     this.context = null;
-    this.isOwner = false;
   }
 }
