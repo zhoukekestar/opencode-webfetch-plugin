@@ -1,4 +1,9 @@
 import { chromium } from 'playwright';
+
+// bun 执行 playwright 会有协议握手的 bug，导致无法连接，所以需要通过 nodejs 来绕过
+      // https://github.com/oven-sh/bun/issues/9911
+
+      
 await chromium.launchPersistentContext('/Users/zkk/.cache/opencode/user-data-9222', {
     executablePath: '/Users/zkk/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
     
