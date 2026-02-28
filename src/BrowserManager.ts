@@ -34,7 +34,7 @@ export class BrowserManager {
    */
   public async fetchWebpage(url: string, timeout: number, ctx: ToolContext): Promise<string> {
     const browserServer = await this.ensureBrowserServer();
-    const context = browserServer.getContext();
+    const context = await browserServer.getContext();
     
     if (!context) throw new Error('Browser context not initialized');
 

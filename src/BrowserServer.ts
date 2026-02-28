@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import type { BrowserContext } from 'playwright';
+import type { Browser, BrowserContext } from 'playwright';
 
 type PlaywrightModule = typeof import('playwright');
 
@@ -14,14 +14,16 @@ const PROJECT_DIR = path.resolve(__dirname, '..');
 
 const CDP_PORT = parseInt(process.env.WEBFETCH_CDP_PORT || '9222', 10);
 const USER_DATA_DIR = path.resolve(os.homedir(), `.cache/opencode/user-data-${CDP_PORT}`);
-const LAUNCH_SCRIPT = path.resolve(os.homedir(), '.cache/opencode/launch-browser.ts');
+const LAUNCH_SCRIPT = path.resolve(__dirname, 'launch-browser.ts');
 
 export class BrowserServer {
   private static instance: BrowserServer | null = null;
   private static initPromise: Promise<BrowserServer> | null = null;
   private context: BrowserContext | null = null;
+  private browser: Browser | null = null;
   private readonly playwright: PlaywrightModule;
   private readonly client: any;
+  private isReconnecting: boolean = false;
 
   private constructor(playwright: PlaywrightModule, client: any) {
     this.playwright = playwright;
@@ -55,8 +57,6 @@ export class BrowserServer {
       fs.mkdirSync(USER_DATA_DIR, { recursive: true });
     }
 
-    this.ensureLaunchScript();
-
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (await this.tryConnect()) {
         return;
@@ -76,70 +76,6 @@ export class BrowserServer {
     }
 
     throw new Error('Failed to start or connect to browser after 3 attempts');
-  }
-
-  private ensureLaunchScript(): void {
-    const scriptContent = `import { chromium } from 'playwright';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
-const CDP_PORT = ${CDP_PORT};
-const USER_DATA_DIR = path.resolve(os.homedir(), '.cache/opencode/user-data-${CDP_PORT}');
-
-async function main() {
-  const singletonLock = path.join(USER_DATA_DIR, 'SingletonLock');
-  if (fs.existsSync(singletonLock)) {
-    fs.unlinkSync(singletonLock);
-  }
-
-  const extensionPath = path.resolve(os.homedir(), '.cache/opencode/extensions');
-  const extensions: string[] = [];
-  if (fs.existsSync(extensionPath)) {
-    const dirs = fs.readdirSync(extensionPath).map(d => path.join(extensionPath, d));
-    extensions.push(...dirs.filter(d => fs.statSync(d).isDirectory()));
-  }
-
-  const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
-    headless: false,
-    ignoreDefaultArgs: ['--remote-debugging-pipe'],
-    args: [
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--remote-allow-origins="*"',
-      // '--disable-blink-features=AutomationControlled',
-      // '--disable-features=VizDisplayCompositor',
-      // '--window-size=1280,720',
-      '--remote-debugging-port=' + CDP_PORT,
-      // ...(extensions.length > 0 ? [
-      //   '--disable-extensions-except=' + extensions.join(','),
-      //   '--load-extension=' + extensions.join(',')
-      // ] : []),
-    ],
-    viewport: { width: 1280, height: 720 },
-  });
-
-  context.on('page', async (page) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      const chrome = (window as any).chrome;
-      if (chrome && chrome.runtime && chrome.runtime.onConnect) {
-        delete chrome.runtime.onConnect;
-      }
-    });
-  });
-
-  console.log('Browser launched on port ' + CDP_PORT);
-}
-
-main().catch(console.error);
-`;
-
-    const scriptDir = path.dirname(LAUNCH_SCRIPT);
-    if (!fs.existsSync(scriptDir)) {
-      fs.mkdirSync(scriptDir, { recursive: true });
-    }
-    fs.writeFileSync(LAUNCH_SCRIPT, scriptContent);
   }
 
   private async spawnIndependentBrowser(): Promise<void> {
@@ -202,6 +138,13 @@ main().catch(console.error);
     this.client?.logger?.info(`Connecting to browser at ${wsEndpoint}...`);
 
     const browser = await this.playwright.chromium.connectOverCDP(wsEndpoint);
+    this.browser = browser;
+    
+    browser.on('disconnected', () => {
+      this.client?.logger?.warn('Browser disconnected unexpectedly');
+      this.browser = null;
+      this.context = null;
+    });
     
     const contexts = browser.contexts();
     if (contexts.length > 0) {
@@ -216,11 +159,50 @@ main().catch(console.error);
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  getContext(): BrowserContext | null {
+  async getContext(): Promise<BrowserContext | null> {
+    if (!this.context || !this.browser?.isConnected()) {
+      if (this.isReconnecting) {
+        while (this.isReconnecting) {
+          await this.sleep(100);
+        }
+        return this.context;
+      }
+      
+      this.isReconnecting = true;
+      try {
+        this.client?.logger?.info('Browser context lost, attempting to reconnect...');
+        await this.reconnect();
+      } finally {
+        this.isReconnecting = false;
+      }
+    }
     return this.context;
+  }
+
+  private async reconnect(): Promise<void> {
+    this.browser = null;
+    this.context = null;
+    
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      this.client?.logger?.info(`Reconnection attempt ${attempt}/3...`);
+      
+      if (await this.tryConnect()) {
+        this.client?.logger?.info('Successfully reconnected to browser');
+        return;
+      }
+
+      if (attempt < 3) {
+        await this.spawnIndependentBrowser();
+        const waitTime = Math.floor(Math.random() * 3000) + 2000;
+        await this.sleep(waitTime);
+      }
+    }
+    
+    throw new Error('Failed to reconnect to browser after 3 attempts');
   }
 
   async dispose(): Promise<void> {
     this.context = null;
+    this.browser = null;
   }
 }
